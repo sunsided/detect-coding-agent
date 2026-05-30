@@ -1,0 +1,26 @@
+[package]
+name = "detect-coding-agent"
+version = "0.1.0"
+edition = "2021"
+description = "Detect if your application is being invoked by an AI coding agent such as Claude Code, Copilot, Cursor, Codex, Aider, and many more."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/sunsided/detect-coding-agent"
+homepage = "https://github.com/sunsided/detect-coding-agent"
+keywords = ["ai", "agent", "coding", "detection", "claude"]
+categories = ["development-tools", "command-line-utilities"]
+readme = "README.md"
+
+[features]
+default = []
+
+# Enable detection via process ancestry checks (requires spawning a subprocess on some platforms).
+# When enabled, agents that only expose process-name signals (e.g. Devin, Octofriend) can be detected.
+process-detection = []
+
+[dependencies]
+
+[dev-dependencies]
+
+[[example]]
+name = "detect"
+path = "examples/detect.rs"
