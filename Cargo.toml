@@ -15,6 +15,7 @@ default = []
 
 # Enable detection via process ancestry checks (requires spawning a subprocess on some platforms).
 # When enabled, agents that only expose process-name signals (e.g. Devin, Octofriend) can be detected.
+# NOTE: This feature is currently a placeholder and has no effect; it is reserved for future implementation.
 process-detection = []
 
 [dependencies]

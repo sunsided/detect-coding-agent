@@ -6,7 +6,9 @@
 //! ```
 
 fn main() {
-    match detect_coding_agent::detect() {
+    let agent = detect_coding_agent::detect();
+
+    match &agent {
         Some(agent) => {
             println!("✅ Coding agent detected!");
             println!("   Name : {}", agent.name);
@@ -20,7 +22,7 @@ fn main() {
     }
 
     // Convenience helpers
-    if detect_coding_agent::is_agent() {
+    if agent.map(|a| a.is_agent() || a.is_hybrid()).unwrap_or(false) {
         println!();
         println!("💡 Tip: This is an autonomous agent session — consider offering a");
         println!("   machine-friendly interface (e.g. via MCP) for better results.");

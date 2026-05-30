@@ -150,7 +150,9 @@ fn matches_qwen_code(env: &Env) -> bool {
 fn matches_copilot_cloud_agent(env: &Env) -> bool {
     // GitHub Copilot Cloud Agent (Copilot coding agent running as a GitHub Actions job).
     // It sets COPILOT_AGENT_SESSION_ID and/or COPILOT_CLI=1 together with GITHUB_ACTIONS.
-    (env.contains("COPILOT_AGENT_SESSION_ID") || env.contains("COPILOT_AGENT_JOB_ID"))
+    (env.contains("COPILOT_AGENT_SESSION_ID")
+        || env.contains("COPILOT_AGENT_JOB_ID")
+        || env.equals("COPILOT_CLI", "1"))
         && env.equals("GITHUB_ACTIONS", "true")
 }
 
@@ -484,6 +486,14 @@ mod tests {
     #[test]
     fn detects_copilot_cloud_agent() {
         let env = env_with2("COPILOT_AGENT_SESSION_ID", "sess-abc", "GITHUB_ACTIONS", "true");
+        let result = detect(&env).unwrap();
+        assert_eq!(result.id, "copilot-cloud-agent");
+        assert_eq!(result.kind, AgentKind::Agent);
+    }
+
+    #[test]
+    fn detects_copilot_cloud_agent_by_cli_flag() {
+        let env = env_with2("COPILOT_CLI", "1", "GITHUB_ACTIONS", "true");
         let result = detect(&env).unwrap();
         assert_eq!(result.id, "copilot-cloud-agent");
         assert_eq!(result.kind, AgentKind::Agent);

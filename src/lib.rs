@@ -2,7 +2,7 @@
 //!
 //! Detect whether your application is being invoked by an AI coding agent,
 //! such as **Claude Code**, **GitHub Copilot Cloud Agent**, **OpenAI Codex**,
-//! **Cursor**, **Aider**, **Gemini CLI**, and [many more](providers::all_providers).
+//! **Cursor**, **Aider**, **Gemini CLI**, and [many more](providers).
 //!
 //! ## Why?
 //!
