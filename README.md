@@ -140,5 +140,5 @@ Sample output when run inside a GitHub Copilot Cloud Agent session:
 
 ## License
 
-Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
+Licensed under either of [European Union Public License, Version 1.2](LICENSE-EUPL), [Apache License, Version 2.0](LICENSE-APACHE) or
 [MIT license](LICENSE-MIT) at your option.
