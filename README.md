@@ -2,7 +2,10 @@
 
 [![Crates.io](https://img.shields.io/crates/v/detect-coding-agent)](https://crates.io/crates/detect-coding-agent)
 [![docs.rs](https://docs.rs/detect-coding-agent/badge.svg)](https://docs.rs/detect-coding-agent)
-[![License](https://img.shields.io/crates/l/detect-coding-agent)](LICENSE-MIT)
+[![unsafe forbidden](https://img.shields.io/badge/unsafe-forbidden-success.svg)](https://github.com/rust-secure-code/safety-dance/)
+[![License: EUPL-1.2](https://img.shields.io/badge/license-EUPL--1.2-blue.svg)](LICENSE-EUPL)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE-MIT)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE-APACHE)
 
 A Rust utility crate that detects whether your application is being invoked by
 an AI coding agent such as **Claude Code**, **GitHub Copilot Cloud Agent**,

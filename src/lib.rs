@@ -54,6 +54,8 @@
 //! assert_eq!(agent.id, "claude-code");
 //! ```
 
+#![forbid(unsafe_code)]
+
 mod env;
 pub mod providers;
 mod types;
