@@ -54,8 +54,7 @@ fn matches_cursor_agent(env: &Env) -> bool {
     // Cursor in agent mode sets CURSOR_TRACE_ID AND overrides PAGER.
     // The PAGER override is the distinguishing signal for the automated agent
     // versus an interactive Cursor terminal session.
-    env.contains("CURSOR_TRACE_ID")
-        && env.equals("PAGER", "head -n 10000 | cat")
+    env.contains("CURSOR_TRACE_ID") && env.equals("PAGER", "head -n 10000 | cat")
 }
 
 fn matches_cursor(env: &Env) -> bool {
@@ -125,9 +124,7 @@ fn matches_windsurf(env: &Env) -> bool {
 fn matches_crush(env: &Env) -> bool {
     // Crush (Charm) sets CRUSH=1 (and AGENT=crush, AI_AGENT=crush) on every shell exec.
     // https://github.com/charmbracelet/crush
-    env.equals("CRUSH", "1")
-        || env.equals("AGENT", "crush")
-        || env.equals("AI_AGENT", "crush")
+    env.equals("CRUSH", "1") || env.equals("AGENT", "crush") || env.equals("AI_AGENT", "crush")
 }
 
 fn matches_amp(env: &Env) -> bool {
@@ -485,7 +482,12 @@ mod tests {
 
     #[test]
     fn detects_copilot_cloud_agent() {
-        let env = env_with2("COPILOT_AGENT_SESSION_ID", "sess-abc", "GITHUB_ACTIONS", "true");
+        let env = env_with2(
+            "COPILOT_AGENT_SESSION_ID",
+            "sess-abc",
+            "GITHUB_ACTIONS",
+            "true",
+        );
         let result = detect(&env).unwrap();
         assert_eq!(result.id, "copilot-cloud-agent");
         assert_eq!(result.kind, AgentKind::Agent);
@@ -507,7 +509,12 @@ mod tests {
 
     #[test]
     fn detects_cursor_agent() {
-        let env = env_with2("CURSOR_TRACE_ID", "trace-abc", "PAGER", "head -n 10000 | cat");
+        let env = env_with2(
+            "CURSOR_TRACE_ID",
+            "trace-abc",
+            "PAGER",
+            "head -n 10000 | cat",
+        );
         let result = detect(&env).unwrap();
         assert_eq!(result.id, "cursor-agent");
         assert_eq!(result.kind, AgentKind::Agent);
