@@ -1,0 +1,105 @@
+version: '3'
+
+vars:
+  PROFILE: '{{ .PROFILE | default "debug" }}'
+  PROFILE_FLAG: '{{ if eq .PROFILE "release" }}--release{{ end }}'
+  # Extra cargo flags, e.g. FEATURES="--features process-detection" or "--all-features".
+  FEATURES: '{{ .FEATURES | default "" }}'
+
+tasks:
+  default:
+    cmds:
+      - task --list --sort=none
+    silent: true
+
+  build:
+    desc: Compile the crate (PROFILE=debug|release, FEATURES="--all-features")
+    aliases: [b]
+    preconditions:
+      - sh: command -v cargo
+        msg: "cargo not found - install Rust from https://rustup.rs/"
+    cmds:
+      - cargo build --all-targets {{.PROFILE_FLAG}} {{.FEATURES}} {{.CLI_ARGS}}
+
+  run:
+    desc: Run the `detect` example
+    aliases: [example]
+    preconditions:
+      - sh: command -v cargo
+        msg: "cargo not found - install Rust from https://rustup.rs/"
+    cmds:
+      - cargo run --example detect {{.PROFILE_FLAG}} {{.FEATURES}} {{.CLI_ARGS}}
+
+  test:
+    desc: Run the test suite (pass extra args after --)
+    aliases: [t]
+    preconditions:
+      - sh: command -v cargo
+        msg: "cargo not found - install Rust from https://rustup.rs/"
+    cmds:
+      - cargo test --all-targets {{.FEATURES}} {{.CLI_ARGS}}
+      - cargo test --doc {{.FEATURES}}
+
+  fmt:
+    desc: Format code with rustfmt
+    aliases: [format]
+    preconditions:
+      - sh: command -v cargo
+        msg: "cargo not found - install Rust from https://rustup.rs/"
+    cmds:
+      - cargo fmt --all
+
+  lint:
+    desc: Lint with clippy (deny warnings)
+    preconditions:
+      - sh: command -v cargo-clippy
+        msg: "clippy not found - rustup component add clippy"
+    cmds:
+      - cargo clippy --all-targets {{.FEATURES}} {{.CLI_ARGS}} -- -D warnings
+
+  lint:fix:
+    desc: Lint with clippy and auto-apply fixes
+    aliases: [fix]
+    preconditions:
+      - sh: command -v cargo-clippy
+        msg: "clippy not found - rustup component add clippy"
+    cmds:
+      - cargo clippy --fix --allow-dirty --allow-staged --all-targets {{.FEATURES}}
+
+  docs:
+    desc: Build API docs
+    preconditions:
+      - sh: command -v cargo
+        msg: "cargo not found - install Rust from https://rustup.rs/"
+    cmds:
+      - cargo doc --no-deps {{.FEATURES}}
+
+  docs:open:
+    desc: Build API docs and open in browser
+    preconditions:
+      - sh: command -v cargo
+        msg: "cargo not found - install Rust from https://rustup.rs/"
+    cmds:
+      - cargo doc --no-deps --open {{.FEATURES}}
+
+  check:
+    desc: All static checks - fmt check + clippy (both feature sets)
+    cmds:
+      - cargo fmt --all -- --check
+      - cargo clippy --all-targets -- -D warnings
+      - cargo clippy --all-targets --all-features -- -D warnings
+
+  ci:
+    desc: Full CI sequence - static checks + tests (both feature sets)
+    cmds:
+      - task: check
+      - cargo test --all-targets
+      - cargo test --all-targets --all-features
+      - cargo test --doc --all-features
+
+  clean:
+    desc: Remove build output
+    status:
+      - test ! -d target
+    cmds:
+      - cargo clean
