@@ -84,7 +84,10 @@ agent-specific signals are recognized (in detection order):
 | Bolt.new Agent | Agent | `SHELL=/bin/jsh` + `npm_config_yes` | low |
 | [Zed](https://zed.dev) Agent | Agent | `TERM_PROGRAM=zed` + `PAGER=""` + `GIT_PAGER=cat` | high |
 | Warp Agent | Agent | `OZ_RUN_ID` | low |
-| Devin | Agent | `EDITOR` containing `devin` / `/opt/.devin` (feature `fs-markers`) | low / high |
+| Devin | Agent | `EDITOR` containing `devin` / `/opt/.devin` (feature `fs-markers`) / `devin` process | low / high / medium |
+| [Aider](https://aider.chat) | Agent | `aider` process (feature `process-detection`) | medium |
+| [Factory Droid](https://factory.ai) | Agent | `droid` process (feature `process-detection`) | medium |
+| [Octofriend](https://github.com/synthetic-lab/octofriend) | Agent | `octofriend` process (feature `process-detection`) | medium |
 | Cursor | Interactive | `CURSOR_TRACE_ID` | low |
 | Replit | Interactive | `REPL_ID` | low |
 | Bolt.new | Interactive | `SHELL=/bin/jsh` | low |
@@ -131,6 +134,10 @@ pub fn detect_all() -> Vec<DetectedAgent>
 pub fn detect_with_env(env: HashMap<String, String>) -> Option<DetectedAgent>
 pub fn detect_all_with_env(env: HashMap<String, String>) -> Vec<DetectedAgent>
 
+// Same, plus an explicit process ancestry, nearest ancestor first
+pub fn detect_with_env_and_ancestry(env: HashMap<String, String>, ancestry: &[Ancestor]) -> Option<DetectedAgent>
+pub fn detect_all_with_env_and_ancestry(env: HashMap<String, String>, ancestry: &[Ancestor]) -> Vec<DetectedAgent>
+
 // Convenience helpers
 pub fn is_agent() -> bool       // true for Agent + Hybrid
 pub fn is_interactive() -> bool // true for Interactive + Hybrid
@@ -167,20 +174,32 @@ pub enum AgentKind {
 ## Detection strategy
 
 By default, detection reads **environment variables** only; it never spawns
-subprocesses. With the `fs-markers` feature enabled, `detect()` and
-`detect_all()` also check for files that some agents leave behind (currently
-Devin's `/opt/.devin`); `detect_with_env()` and `detect_all_with_env()` never
-touch the file system. Signals are checked in tiers, and the first match wins:
+subprocesses. Two opt-in features let `detect()` and `detect_all()` look further:
+
+- `fs-markers` checks for files that some agents leave behind (currently
+  Devin's `/opt/.devin`).
+- `process-detection` walks up the process tree looking for known agent
+  executables. This is currently implemented for Linux only, by reading `/proc`
+  (no subprocesses); on other platforms the ancestry is empty.
+
+`detect_with_env()` and `detect_all_with_env()` never touch the file system;
+`detect_with_env_and_ancestry()` takes the ancestry as an argument and works on
+every platform. Signals are checked in tiers, and the first match wins:
 
 1. `AI_AGENT` naming an agent.
 2. Agent-specific variables. Agents that build on other agents come first, since
    they inherit their parent's variables (Amp sets `CLAUDECODE`, Kilo sets
    `OPENCODE=1`, Qwen Code is a Gemini CLI fork).
 3. File markers (feature `fs-markers`, only for `detect()` / `detect_all()`).
-4. Ambient signals of IDEs and terminals that also host human sessions.
+4. Process ancestry: the nearest ancestor that is a known agent executable.
+   This catches agents that set no environment variables at all (Aider, Devin,
+   Factory Droid, Octofriend), and agents whose environment was scrubbed
+   (e.g. `env -i`). An ancestor matches by process name, `argv[0]`, or, for
+   `node` / `python` / `bun` / `deno`, the script or `-m` module it runs.
+5. Ambient signals of IDEs and terminals that also host human sessions.
    The interactive variant of a tool is only reported when its agent variant
    does not match.
-5. Anonymous announcements (`AGENT=1`, `AI_AGENT=1`, or `AGENT=<known name>`).
+6. Anonymous announcements (`AGENT=1`, `AI_AGENT=1`, or `AGENT=<known name>`).
 
 Detection results are a hint, not a security boundary: any process can set these
 variables, so never use them for authorization.
@@ -190,14 +209,15 @@ variables, so never use them for authorization.
 | Feature | Effect |
 |---|---|
 | `fs-markers` | Also check file-system markers left by agents (`/opt/.devin`). |
-| `process-detection` | Reserved for process-ancestry detection; currently has no effect. |
+| `process-detection` | Also check the process ancestry for known agent executables (Linux only for now, via `/proc`; computed once and cached). |
 
 ## Migrating from 0.1
 
 - `DetectedAgent` and `AgentKind` are `#[non_exhaustive]`; `DetectedAgent` gained
   `confidence`, `signal`, `version`, `mode` and `ai_agent`. `AgentKind` is now `Copy`.
-- Aider is no longer detected: `AIDER_API_KEY` is user configuration, not a
-  signal Aider injects, and caused false positives.
+- Aider is no longer detected from the environment: `AIDER_API_KEY` is user
+  configuration, not a signal Aider injects, and caused false positives. With
+  the `process-detection` feature it is detected from the process ancestry.
 - `windsurf` is now the interactive IDE terminal; the agent is `windsurf-cascade`.
 - The Copilot CLI outside GitHub Actions is reported as `copilot-cli`.
 - Zed's agent terminal is detected by `PAGER=""` + `GIT_PAGER=cat`; `PAGER=cat`

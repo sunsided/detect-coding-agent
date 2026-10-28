@@ -31,19 +31,28 @@
 //! ## Detection strategy
 //!
 //! By default, detection reads **environment variables** only; it never spawns
-//! subprocesses.  With the `fs-markers` feature enabled, [`detect`] and
-//! [`detect_all`] also check for files that some agents leave behind
-//! (currently Devin's `/opt/.devin`); [`detect_with_env`] and
-//! [`detect_all_with_env`] never touch the file system.  Signals are checked
-//! in tiers:
+//! subprocesses.  Two opt-in features let [`detect`] and [`detect_all`] look
+//! further:
+//!
+//! - `fs-markers` checks for files that some agents leave behind
+//!   (currently Devin's `/opt/.devin`).
+//! - `process-detection` walks up the process tree looking for known agent
+//!   executables (Linux only for now, read from `/proc`).
+//!
+//! [`detect_with_env`] and [`detect_all_with_env`] never touch the file system;
+//! [`detect_with_env_and_ancestry`] takes the process ancestry as an argument.
+//! Signals are checked in tiers:
 //!
 //! 1. The generic **`AI_AGENT`** variable, an emerging cross-tool convention
 //!    (`AI_AGENT=claude-code_2-1-312_agent`, `AI_AGENT=devin@1`).  Its version
 //!    and mode are reported in [`DetectedAgent::version`] and [`DetectedAgent::mode`].
 //! 2. **Agent-specific** variables that agents inject into the commands they run.
 //! 3. **File markers** (feature `fs-markers`, [`detect`] / [`detect_all`] only).
-//! 4. **Ambient** signals of IDEs and terminals that also host human sessions.
-//! 5. **Anonymous** announcements (`AGENT=1`, `AI_AGENT=1`), reported as `"unknown"`.
+//! 4. **Process ancestry**: the nearest ancestor that is a known agent executable.
+//!    This catches agents that set no environment variables (Aider, Devin,
+//!    Factory Droid, Octofriend).
+//! 5. **Ambient** signals of IDEs and terminals that also host human sessions.
+//! 6. **Anonymous** announcements (`AGENT=1`, `AI_AGENT=1`), reported as `"unknown"`.
 //!
 //! [`detect`] returns the first match; [`detect_all`] returns every match,
 //! which is useful when agents run inside each other.  Each result carries a
@@ -75,15 +84,25 @@
 
 mod ai_agent;
 mod env;
+mod process;
 pub mod providers;
 mod types;
 
 use std::collections::HashMap;
 
+pub use process::Ancestor;
 pub use types::{AgentKind, Confidence, DetectedAgent};
 
-/// Whether file-system markers are checked for the current process.
-const FILE_MARKERS: bool = cfg!(feature = "fs-markers");
+/// The sources consulted for the current process, depending on enabled features.
+fn current_sources() -> providers::Sources<'static> {
+    providers::Sources {
+        file_markers: cfg!(feature = "fs-markers"),
+        #[cfg(feature = "process-detection")]
+        ancestry: process::current_ancestry(),
+        #[cfg(not(feature = "process-detection"))]
+        ancestry: &[],
+    }
+}
 
 /// Detect the AI coding agent present in the **current process environment**.
 ///
@@ -97,7 +116,7 @@ const FILE_MARKERS: bool = cfg!(feature = "fs-markers");
 /// }
 /// ```
 pub fn detect() -> Option<DetectedAgent> {
-    providers::detect(&env::Env::current(), FILE_MARKERS)
+    providers::detect(&env::Env::current(), current_sources())
 }
 
 /// Detect **all** AI coding agents present in the current process environment,
@@ -107,7 +126,7 @@ pub fn detect() -> Option<DetectedAgent> {
 /// inherit their parent's variables, so more than one agent can match.
 /// The first element is what [`detect`] returns.
 pub fn detect_all() -> Vec<DetectedAgent> {
-    providers::detect_all(&env::Env::current(), FILE_MARKERS)
+    providers::detect_all(&env::Env::current(), current_sources())
 }
 
 /// Detect the AI coding agent using a **caller-supplied** environment map.
@@ -127,17 +146,62 @@ pub fn detect_all() -> Vec<DetectedAgent> {
 /// assert_eq!(agent.id, "codex");
 /// ```
 ///
-/// File markers (feature `fs-markers`) are never checked, so the result
+/// File markers and process ancestry are never checked, so the result
 /// depends on `env` alone.
 pub fn detect_with_env(env: HashMap<String, String>) -> Option<DetectedAgent> {
-    providers::detect(&env::Env::from_map(env), false)
+    providers::detect(&env::Env::from_map(env), Default::default())
 }
 
 /// Detect all AI coding agents using a **caller-supplied** environment map.
 ///
 /// This is the testable variant of [`detect_all`].
 pub fn detect_all_with_env(env: HashMap<String, String>) -> Vec<DetectedAgent> {
-    providers::detect_all(&env::Env::from_map(env), false)
+    providers::detect_all(&env::Env::from_map(env), Default::default())
+}
+
+/// Detect the AI coding agent using a caller-supplied environment map and
+/// **process ancestry** (nearest ancestor first).
+///
+/// This works on every platform and with or without the `process-detection`
+/// feature; the feature only controls whether [`detect`] reads the ancestry
+/// of the current process.  File markers are never checked.
+///
+/// # Example
+///
+/// ```rust
+/// use std::collections::HashMap;
+/// use detect_coding_agent::{Ancestor, detect_with_env_and_ancestry};
+///
+/// let ancestry = [
+///     Ancestor::new("bash", ["/bin/bash"]),
+///     Ancestor::new("aider", ["/usr/bin/python3", "/home/me/.local/bin/aider"]),
+/// ];
+///
+/// let agent = detect_with_env_and_ancestry(HashMap::new(), &ancestry).unwrap();
+/// assert_eq!(agent.id, "aider");
+/// assert_eq!(agent.signal, "process:aider");
+/// ```
+pub fn detect_with_env_and_ancestry(
+    env: HashMap<String, String>,
+    ancestry: &[Ancestor],
+) -> Option<DetectedAgent> {
+    providers::detect(&env::Env::from_map(env), ancestry_only(ancestry))
+}
+
+/// Detect all AI coding agents using a caller-supplied environment map and
+/// process ancestry.  See [`detect_with_env_and_ancestry`].
+pub fn detect_all_with_env_and_ancestry(
+    env: HashMap<String, String>,
+    ancestry: &[Ancestor],
+) -> Vec<DetectedAgent> {
+    providers::detect_all(&env::Env::from_map(env), ancestry_only(ancestry))
+}
+
+fn ancestry_only(ancestry: &[Ancestor]) -> providers::Sources<'_> {
+    providers::Sources {
+        file_markers: false,
+        ancestry,
+    }
 }
 
 /// Returns `true` when the current process is running inside an autonomous
