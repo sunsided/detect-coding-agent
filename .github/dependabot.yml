@@ -8,6 +8,8 @@ updates:
       time: "04:00"
       timezone: "Etc/UTC"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     groups:
       cargo-minor-and-patch:
         update-types:
@@ -25,6 +27,8 @@ updates:
       time: "04:15"
       timezone: "Etc/UTC"
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
     groups:
       actions-minor-and-patch:
         update-types:
