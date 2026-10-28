@@ -166,9 +166,11 @@ pub enum AgentKind {
 
 ## Detection strategy
 
-Detection is based on **environment variables** — no subprocesses are spawned
-and no filesystem access is performed unless the `fs-markers` feature is enabled.
-Signals are checked in tiers, and the first match wins:
+By default, detection reads **environment variables** only; it never spawns
+subprocesses. With the `fs-markers` feature enabled, `detect()` and
+`detect_all()` also check for files that some agents leave behind (currently
+Devin's `/opt/.devin`); `detect_with_env()` and `detect_all_with_env()` never
+touch the file system. Signals are checked in tiers, and the first match wins:
 
 1. `AI_AGENT` naming an agent.
 2. Agent-specific variables. Agents that build on other agents come first, since

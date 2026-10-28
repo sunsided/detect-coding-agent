@@ -30,9 +30,12 @@
 //!
 //! ## Detection strategy
 //!
-//! Detection is based on **environment variables** only (no subprocesses are
-//! spawned, no filesystem access is performed unless the `fs-markers` feature
-//! is enabled).  Signals are checked in tiers:
+//! By default, detection reads **environment variables** only; it never spawns
+//! subprocesses.  With the `fs-markers` feature enabled, [`detect`] and
+//! [`detect_all`] also check for files that some agents leave behind
+//! (currently Devin's `/opt/.devin`); [`detect_with_env`] and
+//! [`detect_all_with_env`] never touch the file system.  Signals are checked
+//! in tiers:
 //!
 //! 1. The generic **`AI_AGENT`** variable, an emerging cross-tool convention
 //!    (`AI_AGENT=claude-code_2-1-312_agent`, `AI_AGENT=devin@1`).  Its version
