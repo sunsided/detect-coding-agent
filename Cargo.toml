@@ -15,9 +15,9 @@ readme = "README.md"
 [features]
 default = []
 
-# Enable detection via process ancestry checks (requires spawning a subprocess on some platforms).
-# When enabled, agents that only expose process-name signals (e.g. Devin, Octofriend) can be detected.
-# NOTE: This feature is currently a placeholder and has no effect; it is reserved for future implementation.
+# Check the process ancestry for known agent executables in `detect()` / `detect_all()`, so agents
+# without environment signals (e.g. Aider, Devin, Factory Droid, Octofriend) can be detected.
+# Linux only for now (reads /proc, no subprocesses); on other platforms the ancestry is empty.
 process-detection = []
 
 # Check file-system markers left by agents (e.g. Devin's /opt/.devin) in `detect()` / `detect_all()`.

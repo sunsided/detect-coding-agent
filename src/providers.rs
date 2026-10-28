@@ -8,9 +8,11 @@
 //!    their parent's variables (e.g. Amp before Claude Code, Kilo before OpenCode,
 //!    Qwen Code before Gemini CLI).
 //! 3. **Optional file markers** (cargo feature `fs-markers`, current process only).
-//! 4. **Ambient signals** of IDEs and terminals that also host human sessions
+//! 4. **Process ancestry** (cargo feature `process-detection` for the current
+//!    process, Linux only): the nearest ancestor that is a known agent executable.
+//! 5. **Ambient signals** of IDEs and terminals that also host human sessions
 //!    (e.g. `TERM_PROGRAM`, `REPL_ID`).
-//! 5. **Anonymous announcements**: a known name in the legacy `AGENT` variable,
+//! 6. **Anonymous announcements**: a known name in the legacy `AGENT` variable,
 //!    or `AGENT` / `AI_AGENT` set to a flag value such as `1`.
 //!
 //! Every matcher documents where its signal comes from. Signals without a
@@ -49,7 +51,10 @@
 //! | Bolt.new Agent | agent | `SHELL=/bin/jsh` + `npm_config_yes` |
 //! | Zed Agent | agent | `TERM_PROGRAM=zed` + `PAGER=""` + `GIT_PAGER=cat` |
 //! | Warp Agent | agent | `OZ_RUN_ID` |
-//! | Devin | agent | `EDITOR` containing `devin`; file `/opt/.devin` (`fs-markers`) |
+//! | Devin | agent | `EDITOR` containing `devin`; file `/opt/.devin` (`fs-markers`); process `devin` |
+//! | Aider | agent | process `aider` |
+//! | Factory Droid | agent | process `droid` |
+//! | Octofriend | agent | process `octofriend` |
 //! | Cursor | interactive | `CURSOR_TRACE_ID` |
 //! | Replit | interactive | `REPL_ID` |
 //! | Bolt.new | interactive | `SHELL=/bin/jsh` |
@@ -57,9 +62,13 @@
 //! | Kiro | interactive | `TERM_PROGRAM=kiro` |
 //! | Windsurf | interactive | `CODEIUM_EDITOR_APP_ROOT` |
 //! | Warp Terminal | hybrid | `TERM_PROGRAM=WarpTerminal` |
+//!
+//! Claude Code, OpenAI Codex, Gemini CLI, Qwen Code, Crush and OpenCode are
+//! also recognized as ancestor processes, for commands run with a scrubbed environment.
 
 use crate::ai_agent::{self, AI_AGENT, AiAgent, Announcement};
 use crate::env::Env;
+use crate::process::Ancestor;
 use crate::types::{AgentKind, Confidence, DetectedAgent, UNKNOWN_ID};
 
 /// A provider definition: a static description of an AI coding agent and
@@ -376,6 +385,12 @@ fn matches_warp_agent(env: &Env) -> Option<Hit> {
     first_set(env, &["OZ_RUN_ID"], Low)
 }
 
+fn no_env_signal(_: &Env) -> Option<Hit> {
+    // The agent injects no environment variables; it is detected by process
+    // ancestry or through AI_AGENT only.
+    None
+}
+
 fn matches_devin(env: &Env) -> Option<Hit> {
     // Devin's machines point EDITOR at a devin binary; no vendor documentation, checked by std-env.
     hit_if(env.value_contains("EDITOR", "devin"), "EDITOR", Low)
@@ -619,6 +634,15 @@ static AGENTS: &[Provider] = &[
         matches_warp_agent,
     ),
     agent("devin", "Devin", &["devin"], matches_devin),
+    // Aider sets no marker on the commands it runs (aider/run_cmd.py).
+    agent("aider", "Aider", &["aider"], no_env_signal),
+    agent(
+        "factory-droid",
+        "Factory Droid",
+        &["droid", "factory-droid"],
+        no_env_signal,
+    ),
+    agent("octofriend", "Octofriend", &["octofriend"], no_env_signal),
 ];
 
 /// Ambient providers (tier 4): IDEs and terminals that also host human sessions.
@@ -677,9 +701,18 @@ fn unknown(hit: Hit, ai_agent: Option<&AiAgent>) -> DetectedAgent {
     provider(UNKNOWN_ID, "Unknown agent", AgentKind::Agent, &[], |_| None).detected(hit, ai_agent)
 }
 
-/// Run detection against `env`, returning every match in detection order,
-/// at most one per agent id. `file_markers` enables tier 3.
-pub(crate) fn detect_all(env: &Env, file_markers: bool) -> Vec<DetectedAgent> {
+/// Signals beyond the environment that detection may consult.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Sources<'a> {
+    /// Check file-system markers (tier 3).
+    pub file_markers: bool,
+    /// The ancestry of the inspected process, nearest first (tier 4).
+    pub ancestry: &'a [Ancestor],
+}
+
+/// Run detection against `env` and `sources`, returning every match in
+/// detection order, at most one per agent id.
+pub(crate) fn detect_all(env: &Env, sources: Sources<'_>) -> Vec<DetectedAgent> {
     let mut found: Vec<DetectedAgent> = Vec::new();
     let mut push = |agent: DetectedAgent| {
         if !found.iter().any(|f| f.id == agent.id) {
@@ -721,20 +754,25 @@ pub(crate) fn detect_all(env: &Env, file_markers: bool) -> Vec<DetectedAgent> {
     }
 
     // Tier 3: file markers.
-    if file_markers {
+    if sources.file_markers {
         for (provider, hit) in file_marker_hits() {
             push(detected(provider, hit));
         }
     }
 
-    // Tier 4: ambient signals.
+    // Tier 4: process ancestry.
+    for (provider, hit) in process_hits(sources.ancestry) {
+        push(detected(provider, hit));
+    }
+
+    // Tier 5: ambient signals.
     for provider in AMBIENT {
         if let Some(hit) = (provider.matches)(env) {
             push(detected(provider, hit));
         }
     }
 
-    // Tier 5: anonymous announcements.
+    // Tier 6: anonymous announcements.
     if let Some(value) = env.get("AGENT").map(str::trim).filter(|v| !v.is_empty()) {
         let slug = value.to_ascii_lowercase();
         match provider_for_slug(&slug) {
@@ -775,9 +813,64 @@ fn file_marker_hits() -> Vec<(&'static Provider, Hit)> {
     Vec::new()
 }
 
-/// Run detection against the provided `env`, returning the first match.
-pub(crate) fn detect(env: &Env, file_markers: bool) -> Option<DetectedAgent> {
-    detect_all(env, file_markers).into_iter().next()
+/// A process name that identifies an agent when it appears among the ancestors.
+struct ProcessRule {
+    /// The executable name, compared exactly against [`Ancestor::candidate_names`].
+    process: &'static str,
+    /// The provider id.
+    id: &'static str,
+    /// The reported signal, `process:<name>`.
+    signal: &'static str,
+}
+
+macro_rules! process_rule {
+    ($process:literal => $id:literal) => {
+        ProcessRule {
+            process: $process,
+            id: $id,
+            signal: concat!("process:", $process),
+        }
+    };
+}
+
+/// Agent executables recognized in the process ancestry.
+///
+/// Names are kept to distinctive executables; generic words (e.g. `amp`, `pi`,
+/// `goose`) would match unrelated programs. All names are at most 15 bytes,
+/// the length Linux truncates process names to.
+static PROCESS_RULES: &[ProcessRule] = &[
+    // Agents without environment signals (process names as used by am-i-vibing).
+    // https://github.com/ascorbic/am-i-vibing/blob/main/packages/am-i-vibing/src/providers.ts
+    process_rule!("aider" => "aider"),
+    process_rule!("devin" => "devin"),
+    process_rule!("droid" => "factory-droid"),
+    process_rule!("octofriend" => "octofriend"),
+    // Agents that also inject environment variables, for commands run with a
+    // scrubbed environment (e.g. `env -i`).
+    process_rule!("claude" => "claude-code"),
+    process_rule!("codex" => "codex"),
+    process_rule!("gemini" => "gemini-cli"),
+    process_rule!("qwen" => "qwen-code"),
+    process_rule!("crush" => "crush"),
+    process_rule!("opencode" => "opencode"),
+];
+
+/// Matches `ancestry` against [`PROCESS_RULES`], nearest ancestor first.
+fn process_hits(ancestry: &[Ancestor]) -> Vec<(&'static Provider, Hit)> {
+    ancestry
+        .iter()
+        .flat_map(Ancestor::candidate_names)
+        .filter_map(|name| PROCESS_RULES.iter().find(|rule| rule.process == name))
+        .filter_map(|rule| {
+            let provider = all_providers().find(|p| p.id == rule.id)?;
+            Some((provider, Hit::new(rule.signal, Medium)))
+        })
+        .collect()
+}
+
+/// Run detection against `env` and `sources`, returning the first match.
+pub(crate) fn detect(env: &Env, sources: Sources<'_>) -> Option<DetectedAgent> {
+    detect_all(env, sources).into_iter().next()
 }
 
 #[cfg(test)]
@@ -793,12 +886,12 @@ mod tests {
     }
 
     fn detect_id(pairs: &[(&str, &str)]) -> Option<&'static str> {
-        detect(&env(pairs), false).map(|a| a.id)
+        detect(&env(pairs), Sources::default()).map(|a| a.id)
     }
 
     #[track_caller]
     fn assert_detects(pairs: &[(&str, &str)], id: &str, kind: AgentKind, confidence: Confidence) {
-        let agent = detect(&env(pairs), false)
+        let agent = detect(&env(pairs), Sources::default())
             .unwrap_or_else(|| panic!("expected {id} for {pairs:?}, got nothing"));
         assert_eq!(agent.id, id, "{pairs:?}");
         assert_eq!(agent.kind, kind, "{pairs:?}");
@@ -832,7 +925,11 @@ mod tests {
 
     #[test]
     fn ai_agent_claude_code() {
-        let agent = detect(&env(&[("AI_AGENT", "claude-code_2-1-312_agent")]), false).unwrap();
+        let agent = detect(
+            &env(&[("AI_AGENT", "claude-code_2-1-312_agent")]),
+            Sources::default(),
+        )
+        .unwrap();
         assert_eq!(agent.id, "claude-code");
         assert_eq!(agent.signal, "AI_AGENT");
         assert_eq!(agent.confidence, High);
@@ -851,7 +948,7 @@ mod tests {
 
     #[test]
     fn ai_agent_at_version() {
-        let agent = detect(&env(&[("AI_AGENT", "devin@1")]), false).unwrap();
+        let agent = detect(&env(&[("AI_AGENT", "devin@1")]), Sources::default()).unwrap();
         assert_eq!(agent.id, "devin");
         assert_eq!(agent.version.as_deref(), Some("1"));
     }
@@ -871,7 +968,7 @@ mod tests {
 
     #[test]
     fn ai_agent_unknown_name() {
-        let agent = detect(&env(&[("AI_AGENT", "hermes@0.3")]), false).unwrap();
+        let agent = detect(&env(&[("AI_AGENT", "hermes@0.3")]), Sources::default()).unwrap();
         assert!(agent.is_unknown());
         assert_eq!(agent.confidence, High);
         assert_eq!(agent.ai_agent.as_deref(), Some("hermes@0.3"));
@@ -884,7 +981,7 @@ mod tests {
             ("AI_AGENT", "claude-code_2-1-312_agent"),
             ("CLAUDECODE", "1"),
         ];
-        let all = detect_all(&env(&pairs), false);
+        let all = detect_all(&env(&pairs), Sources::default());
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].signal, "AI_AGENT");
     }
@@ -895,7 +992,7 @@ mod tests {
             ("AI_AGENT", "claude-code_2-1-312_agent"),
             ("CODEX_THREAD_ID", "t"),
         ];
-        let all = detect_all(&env(&pairs), false);
+        let all = detect_all(&env(&pairs), Sources::default());
         assert_eq!(all[0].id, "claude-code");
         assert_eq!(all[1].id, "codex");
         assert_eq!(all[1].version, None);
@@ -1216,7 +1313,7 @@ mod tests {
     fn interactive_variant_is_not_listed_next_to_agent_variant() {
         let all = detect_all(
             &env(&[("CURSOR_TRACE_ID", "t"), ("CURSOR_AGENT", "1")]),
-            false,
+            Sources::default(),
         );
         let ids: Vec<_> = all.iter().map(|a| a.id).collect();
         assert_eq!(ids, ["cursor-agent"]);
@@ -1247,6 +1344,128 @@ mod tests {
         );
     }
 
+    // --- Tier 4: process ancestry ---
+
+    fn detect_all_with_ancestry(
+        pairs: &[(&str, &str)],
+        ancestry: &[Ancestor],
+    ) -> Vec<DetectedAgent> {
+        detect_all(
+            &env(pairs),
+            Sources {
+                file_markers: false,
+                ancestry,
+            },
+        )
+    }
+
+    #[test]
+    fn detects_agents_without_env_signals_by_ancestry() {
+        for (ancestor, id) in [
+            (
+                Ancestor::new("aider", ["/usr/bin/python3", "/home/me/.local/bin/aider"]),
+                "aider",
+            ),
+            (
+                Ancestor::new("python3", ["python3", "-m", "aider"]),
+                "aider",
+            ),
+            (Ancestor::new("devin", ["devin"]), "devin"),
+            (
+                Ancestor::new("droid", ["/usr/local/bin/droid"]),
+                "factory-droid",
+            ),
+            (
+                Ancestor::new("node", ["node", "/usr/local/bin/octofriend"]),
+                "octofriend",
+            ),
+        ] {
+            let all = detect_all_with_ancestry(&[], &[Ancestor::new("bash", ["bash"]), ancestor]);
+            assert_eq!(all.len(), 1, "{all:?}");
+            assert_eq!(all[0].id, id);
+            assert_eq!(all[0].confidence, Medium);
+            assert!(all[0].signal.starts_with("process:"), "{}", all[0].signal);
+        }
+    }
+
+    #[test]
+    fn detects_claude_code_by_ancestry_with_scrubbed_env() {
+        // Live sample: Claude Code's exe is named after its version, but comm and argv[0] are "claude".
+        let ancestry = [
+            Ancestor::new("bash", ["/bin/bash", "-c", "..."]),
+            Ancestor::new("claude", ["claude"]),
+        ];
+        let all = detect_all_with_ancestry(&[], &ancestry);
+        assert_eq!(all[0].id, "claude-code");
+        assert_eq!(all[0].signal, "process:claude");
+    }
+
+    #[test]
+    fn detects_node_based_agents_by_script_name() {
+        let ancestry = [Ancestor::new(
+            "node",
+            ["node", "--no-warnings", "/usr/local/bin/gemini"],
+        )];
+        assert_eq!(detect_all_with_ancestry(&[], &ancestry)[0].id, "gemini-cli");
+    }
+
+    #[test]
+    fn nearest_ancestor_comes_first() {
+        let ancestry = [
+            Ancestor::new("aider", ["aider"]),
+            Ancestor::new("claude", ["claude"]),
+        ];
+        let ids: Vec<_> = detect_all_with_ancestry(&[], &ancestry)
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        assert_eq!(ids, ["aider", "claude-code"]);
+    }
+
+    #[test]
+    fn env_signals_precede_ancestry_and_ancestry_precedes_ambient() {
+        let ancestry = [Ancestor::new("aider", ["aider"])];
+        let pairs = [("CODEX_THREAD_ID", "t"), ("TERM_PROGRAM", "WarpTerminal")];
+        let ids: Vec<_> = detect_all_with_ancestry(&pairs, &ancestry)
+            .iter()
+            .map(|a| a.id)
+            .collect();
+        assert_eq!(ids, ["codex", "aider", "warp"]);
+    }
+
+    #[test]
+    fn same_agent_from_env_and_ancestry_is_listed_once() {
+        let ancestry = [Ancestor::new("claude", ["claude"])];
+        let all = detect_all_with_ancestry(&[("CLAUDE_CODE_CHILD_SESSION", "1")], &ancestry);
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].signal, "CLAUDE_CODE_CHILD_SESSION");
+    }
+
+    #[test]
+    fn unrelated_and_partial_process_names_do_not_match() {
+        let ancestry = [
+            Ancestor::new("bash", ["/bin/bash"]),
+            Ancestor::new("vim", ["vim", "/home/me/aider-notes.md"]),
+            Ancestor::new("codex-helper", ["/opt/codex-helper"]),
+            Ancestor::new("systemd", ["/usr/lib/systemd/systemd", "--user"]),
+        ];
+        assert!(detect_all_with_ancestry(&[], &ancestry).is_empty());
+    }
+
+    #[test]
+    fn process_rules_reference_known_providers_and_fit_comm() {
+        for rule in PROCESS_RULES {
+            assert!(all_providers().any(|p| p.id == rule.id), "{}", rule.id);
+            assert!(rule.process.len() <= 15, "{}", rule.process);
+        }
+    }
+
+    #[test]
+    fn agents_without_env_signal_are_detected_via_ai_agent() {
+        assert_eq!(detect_id(&[("AI_AGENT", "aider")]), Some("aider"));
+        assert_eq!(detect_id(&[("AI_AGENT", "droid")]), Some("factory-droid"));
+    }
+
     // --- Removed and unrelated signals ---
 
     #[test]
@@ -1273,7 +1492,7 @@ mod tests {
             ("CODEX_THREAD_ID", "t"),
             ("TERM_PROGRAM", "WarpTerminal"),
         ];
-        let ids: Vec<_> = detect_all(&env(&pairs), false)
+        let ids: Vec<_> = detect_all(&env(&pairs), Sources::default())
             .iter()
             .map(|a| a.id)
             .collect();
