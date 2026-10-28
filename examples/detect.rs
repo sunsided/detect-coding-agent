@@ -6,28 +6,42 @@
 //! ```
 
 fn main() {
-    let agent = detect_coding_agent::detect();
+    let agents = detect_coding_agent::detect_all();
 
-    match &agent {
-        Some(agent) => {
-            println!("✅ Coding agent detected!");
-            println!("   Name : {}", agent.name);
-            println!("   ID   : {}", agent.id);
-            println!("   Kind : {}", agent.kind);
-        }
-        None => {
-            println!("❌ No coding agent detected.");
+    let Some(agent) = agents.first() else {
+        println!("❌ No coding agent detected.");
+        println!("   The process does not appear to be running inside a known AI coding agent.");
+        return;
+    };
+
+    println!("✅ Coding agent detected!");
+    println!("   Name       : {}", agent.name);
+    println!("   ID         : {}", agent.id);
+    println!("   Kind       : {}", agent.kind);
+    println!("   Confidence : {}", agent.confidence);
+    println!("   Signal     : {}", agent.signal);
+    if let Some(version) = &agent.version {
+        println!("   Version    : {version}");
+    }
+    if let Some(mode) = &agent.mode {
+        println!("   Mode       : {mode}");
+    }
+    if let Some(ai_agent) = &agent.ai_agent {
+        println!("   AI_AGENT   : {ai_agent}");
+    }
+
+    if agents.len() > 1 {
+        println!();
+        println!("   Also matched:");
+        for other in &agents[1..] {
             println!(
-                "   The process does not appear to be running inside a known AI coding agent."
+                "   - {} [{}, {} confidence via {}]",
+                other.name, other.kind, other.confidence, other.signal
             );
         }
     }
 
-    // Convenience helpers
-    if agent
-        .map(|a| a.is_agent() || a.is_hybrid())
-        .unwrap_or(false)
-    {
+    if agent.is_agent() || agent.is_hybrid() {
         println!();
         println!("💡 Tip: This is an autonomous agent session — consider offering a");
         println!("   machine-friendly interface (e.g. via MCP) for better results.");

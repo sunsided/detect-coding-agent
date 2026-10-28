@@ -4,7 +4,7 @@ version = "0.1.1"
 edition = "2024"
 rust-version = "1.91.0"
 authors = ["Markus Mayer <widemeadows@gmail.com>"]
-description = "Detect if your application is being invoked by an AI coding agent such as Claude Code, Copilot, Cursor, Codex, Aider, and many more."
+description = "Detect if your application is being invoked by an AI coding agent such as Claude Code, Copilot, Cursor, Codex, Gemini CLI, and many more."
 license = "EUPL-1.2 OR MIT OR Apache-2.0"
 repository = "https://github.com/sunsided/detect-coding-agent"
 homepage = "https://github.com/sunsided/detect-coding-agent"
@@ -19,6 +19,10 @@ default = []
 # When enabled, agents that only expose process-name signals (e.g. Devin, Octofriend) can be detected.
 # NOTE: This feature is currently a placeholder and has no effect; it is reserved for future implementation.
 process-detection = []
+
+# Check file-system markers left by agents (e.g. Devin's /opt/.devin) in `detect()` / `detect_all()`.
+# The `*_with_env` functions never touch the file system.
+fs-markers = []
 
 [dependencies]
 
